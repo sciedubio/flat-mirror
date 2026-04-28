@@ -75,7 +75,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxp9VENZiuolSVTOkuGQ4jJHt1iYOD7sTHmFLj6p0tu9R1tvIKBIlewfrChY1l1z2g5/exec"; // ★ 구글 앱스 스크립트 웹앱 URL 입력
+        // ★ 구글 앱스 스크립트 웹앱 URL 입력 완료
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxp9VENZiuolSVTOkuGQ4jJHt1iYOD7sTHmFLj6p0tu9R1tvIKBIlewfrChY1l1z2g5/exec";
 
         // 사운드 피드백 유틸리티
         const playFeedback = (type) => {
@@ -200,6 +201,18 @@
             const [alertMsg, setAlertMsg] = React.useState('');
             const [isSubmitting, setIsSubmitting] = React.useState(false);
 
+            // 모바일 스크롤 방지용 useEffect 추가
+            React.useEffect(() => {
+                const preventScroll = (e) => {
+                    // 고양이를 드래그 중일 때만 화면 스크롤 차단
+                    if (isDraggingObj) e.preventDefault();
+                };
+                
+                // document 레벨에서 터치 이벤트를 막아 브라우저 기본 스크롤(풀투리프레시 등)을 방지
+                document.addEventListener('touchmove', preventScroll, { passive: false });
+                return () => document.removeEventListener('touchmove', preventScroll);
+            }, [isDraggingObj]);
+
             const triggerParticles = (x, y, isSuccess) => {
                 const id = Date.now() + Math.random();
                 setActiveParticles(prev => [...prev, { id, x, y, isSuccess }]);
@@ -260,7 +273,8 @@
                 const objX = 400 - objectDist * 5;
                 const dist = Math.sqrt((x - objX)**2 + (y - objectY)**2);
                 
-                if (dist < 60) setIsDraggingObj(true);
+                // 모바일 터치 편의성을 위해 인식 범위를 60 -> 100으로 확대
+                if (dist < 100) setIsDraggingObj(true);
             };
 
             const handlePointerMove = (e) => {
@@ -509,7 +523,8 @@
                                                     <path d="M 20 30 Q 25 35 30 30" fill="none" stroke="#334155" strokeWidth="2"/>
                                                 </g>
                                                 <text x="0" y="-35" fill={isImage ? "#94a3b8" : "#f1f5f9"} fontSize="14" textAnchor="middle" fontWeight="bold">{isImage ? "허상" : "실제"}</text>
-                                                {isDraggable && <circle cx="0" cy="0" r="50" fill="transparent" />}
+                                                {/* 터치 반경 100으로 확대된 가상 히트박스 */}
+                                                {isDraggable && <circle cx="0" cy="0" r="100" fill="transparent" />}
                                             </g>
                                         );
 
