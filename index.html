@@ -12,12 +12,11 @@
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3233/3233497.png">
     <title>평면거울 원리 통합 실험실</title>
     
-    <!-- Fonts & Libraries -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700;900&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
 
     <style>
         :root {
@@ -79,7 +78,7 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel">
+    <script type="text/babel" data-presets="react">
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxp9VENZiuolSVTOkuGQ4jJHt1iYOD7sTHmFLj6p0tu9R1tvIKBIlewfrChY1l1z2g5/exec";
 
         // 사운드 피드백 유틸리티
@@ -127,7 +126,6 @@
             } catch (e) { console.error("Audio error", e); }
         };
 
-        // 선생님의 피드백을 반영하여 3번 문항(좌우/앞뒤 오개념 수정) 업데이트
         const QUIZ_POOL = [
             { q: "평면거울에 생기는 상은 거울을 기준으로 물체와 대칭이다.", a: true, explain: "거울에서 물체까지의 거리와 상까지의 거리는 항상 같습니다." },
             { q: "물체가 거울에서 멀어지면, 거울 속의 상은 거울에 가까워진다.", a: false, explain: "물체가 멀어지면 상도 같은 거리만큼 거울에서 멀어집니다." },
@@ -144,7 +142,7 @@
         const Modal = ({ isOpen, onClose, title, children }) => {
             if (!isOpen) return null;
             return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pt-[max(env(safe-area-inset-top,16px),16px)] pb-[max(env(safe-area-inset-bottom,16px),16px)]">
                     <div className="glass w-full max-w-lg rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto transform transition-all">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold text-white">{title}</h2>
@@ -169,6 +167,27 @@
             const [view, setView] = React.useState('intro');
             const svgRef = React.useRef(null);
             const [activeParticles, setActiveParticles] = React.useState([]);
+
+            // History API 적용 (뒤로가기 방어)
+            React.useEffect(() => {
+                const handlePopState = (e) => {
+                    if (e.state && e.state.view) {
+                        setView(e.state.view);
+                    } else {
+                        setView('intro');
+                    }
+                };
+                window.addEventListener('popstate', handlePopState);
+                if (!history.state) {
+                    history.replaceState({ view: 'intro' }, '', '?view=intro');
+                }
+                return () => window.removeEventListener('popstate', handlePopState);
+            }, []);
+
+            const navigate = React.useCallback((newView) => {
+                history.pushState({ view: newView }, '', '?view=' + newView);
+                setView(newView);
+            }, []);
 
             // 탭 모드 (ray | game | illusion | multi | fov)
             const [simMode, setSimMode] = React.useState('ray');
@@ -422,6 +441,7 @@
                             setReflectionSuccess(true);
                             setTimeout(() => playFeedback('success'), 500);
                         }
+                        // 일반 모드에서는 자동 넘김 없이 해설을 읽도록 유지
                     }
                 } else {
                     setReflectionAnswerState('wrong');
@@ -485,14 +505,14 @@
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(payload)
                 }).then(() => {
-                    setTimeout(() => { setIsSubmitting(false); setView('done'); }, 1500);
+                    setTimeout(() => { setIsSubmitting(false); navigate('done'); }, 1500);
                 }).catch(err => {
                     setIsSubmitting(false); setAlertMsg("전송 중 오류가 발생했습니다: " + err.message);
                 });
             };
 
             const renderIntro = () => (
-                <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center animate-fade-in">
+                <div className="flex flex-col items-center justify-center min-h-[100dvh] p-6 pt-[max(env(safe-area-inset-top,24px),24px)] pb-[max(env(safe-area-inset-bottom,24px),24px)] text-center animate-fade-in">
                     <div className="glass p-10 rounded-3xl shadow-2xl max-w-lg w-full flex flex-col items-center">
                         <div className="flex gap-2 mb-6">
                             <span className="text-4xl">🐱</span><span className="text-4xl">🎯</span><span className="text-4xl">🔠</span><span className="text-4xl">💎</span><span className="text-4xl">🧍‍♂️</span>
@@ -506,7 +526,7 @@
                             <span className="text-pink-400 font-bold">4. [심화] 다중거울 만화경</span><br/>
                             <span className="text-emerald-400 font-bold">5. [탐구] 전신을 보려면?</span>
                         </p>
-                        <button onClick={() => setView('simulation')} className="btn-active w-full py-4 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white rounded-2xl font-bold text-xl shadow-lg transition-all">
+                        <button onClick={() => navigate('simulation')} className="btn-active w-full py-4 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white rounded-2xl font-bold text-xl shadow-lg transition-all">
                             실험실 입장하기 🚪
                         </button>
                     </div>
@@ -518,7 +538,7 @@
                 const mirrorX = 400;
 
                 return (
-                    <div className="flex flex-col min-h-screen p-2 sm:p-6 pb-24">
+                    <div className="flex flex-col min-h-[100dvh] p-2 sm:p-6 pt-[max(env(safe-area-inset-top,8px),8px)] pb-[max(env(safe-area-inset-bottom,24px),24px)]">
                         <h2 className="text-2xl font-bold text-white mb-4 text-center mt-2">🔬 평면거울 5종 실험실</h2>
                         
                         {/* 탭 네비게이션 */}
@@ -622,6 +642,7 @@
                                                     <path d="M 20 30 Q 25 35 30 30" fill="none" stroke="#334155" strokeWidth="2"/>
                                                 </g>
                                                 <text x="0" y="-35" fill={isImage ? "#94a3b8" : "#f1f5f9"} fontSize="14" textAnchor="middle" fontWeight="bold">{isImage ? "허상" : "실제"}</text>
+                                                {/* 터치 반경 100으로 확대된 가상 히트박스 */}
                                                 {isDraggable && <circle cx="0" cy="0" r="100" fill="transparent" />}
                                             </g>
                                         );
@@ -677,6 +698,7 @@
                                     {/* =================================================== */}
                                     {/* 모드 2. 대칭 맞추기 게임 */}
                                     {/* =================================================== */}
+                                    {}
                                     {simMode === 'game' && (() => {
                                         const objX = 400 - gameTargetDist * scale;
                                         const targetImgX = 400 + gameTargetDist * scale;
@@ -904,6 +926,7 @@
                                 </svg>
                             </div>
 
+                            {}
                             {/* 조작 패널 (모드에 따라 동적 변경) */}
                             <div className="glass rounded-3xl p-5 lg:w-72 flex flex-col shadow-2xl overflow-y-auto max-h-[350px] lg:max-h-none">
                                 
@@ -1070,7 +1093,7 @@
                                 )}
 
                                 <div className="mt-4 pt-4 border-t border-slate-700">
-                                    <button onClick={() => { setIsTimeAttack(false); setView('report'); }} className="btn-active w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/50 transition-colors">
+                                    <button onClick={() => { setIsTimeAttack(false); navigate('report'); }} className="btn-active w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/50 transition-colors">
                                         실험 완료! 보고서 📝
                                     </button>
                                 </div>
@@ -1081,7 +1104,7 @@
             };
 
             const renderReport = () => (
-                <div className="max-w-3xl mx-auto p-4 sm:p-6 pb-24 animate-fade-in">
+                <div className="max-w-3xl mx-auto p-4 sm:p-6 pb-24 pt-[max(env(safe-area-inset-top,24px),24px)] animate-fade-in">
                     <h2 className="text-3xl font-black text-white mb-8 text-center mt-4">종합 실험 보고서</h2>
                     
                     <div className="space-y-6">
@@ -1156,14 +1179,14 @@
                             </button>
                         </div>
                         <div className="text-center">
-                            <button onClick={()=>setView('simulation')} className="text-slate-400 underline hover:text-white text-sm">실험실로 돌아가기</button>
+                            <button onClick={()=>navigate('simulation')} className="text-slate-400 underline hover:text-white text-sm">실험실로 돌아가기</button>
                         </div>
                     </div>
                 </div>
             );
 
             const renderDone = () => (
-                <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center animate-fade-in">
+                <div className="flex flex-col items-center justify-center min-h-[100dvh] p-6 text-center animate-fade-in pb-[max(env(safe-area-inset-bottom,24px),24px)]">
                     <div className="glass p-10 rounded-3xl shadow-2xl max-w-md w-full flex flex-col items-center border border-green-500/30">
                         <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-6">
                             <span className="text-4xl">🎉</span>
@@ -1181,8 +1204,8 @@
             );
 
             return (
-                <div className="relative min-h-screen flex flex-col">
-                    <button onClick={() => setIsGuideOpen(true)} className="fixed top-4 right-4 z-40 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-600 px-3 py-1.5 rounded-full text-xs font-bold shadow-lg transition-colors">
+                <div className="relative min-h-[100dvh] flex flex-col">
+                    <button onClick={() => setIsGuideOpen(true)} className="fixed top-[max(env(safe-area-inset-top,16px),16px)] right-[max(env(safe-area-inset-right,16px),16px)] z-40 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-600 px-3 py-1.5 rounded-full text-xs font-bold shadow-lg transition-colors">
                         ⚙️ DB 연동 가이드
                     </button>
 
@@ -1215,12 +1238,22 @@
                             </div>
                             
                             <div className="bg-slate-800 p-4 rounded-xl">
-                                <h3 className="font-bold text-yellow-400 mb-2">② Apps Script 코드 작성</h3>
+                                <h3 className="font-bold text-yellow-400 mb-2">② Apps Script 코드 작성 (자동 헤더 포함)</h3>
                                 <div className="relative mt-2">
                                     <pre className="bg-slate-900 p-3 rounded text-xs text-slate-300 overflow-x-auto leading-relaxed">
 {`function doPost(e) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    
+    // 시트가 비어있을 경우 자동으로 1행 헤더를 삽입합니다.
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "timestamp", "studentId", "studentName", "minValue", "maxValue", 
+        "gameSuccess", "reflectionSuccess", "multiSuccess", "fovSuccess", 
+        "timeAttackScore", "quizScore", "insight"
+      ]);
+    }
+    
     const data = JSON.parse(e.postData.contents);
     sheet.appendRow([
       new Date(), data.studentId || "", data.studentName || "",
@@ -1249,7 +1282,7 @@
                         </div>
                     </Modal>
                     
-                    {view !== 'intro' && view !== 'done' && <div className="fixed bottom-4 left-0 right-0 text-center text-slate-600 text-[10px] font-medium pointer-events-none">Created by Yang DH</div>}
+                    {view !== 'intro' && view !== 'done' && <div className="fixed bottom-[max(env(safe-area-inset-bottom,16px),16px)] left-0 right-0 text-center text-slate-600 text-[10px] font-medium pointer-events-none">Created by Yang DH</div>}
                 </div>
             );
         };
