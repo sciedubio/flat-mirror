@@ -35,8 +35,14 @@
             user-select: none;
             -webkit-tap-highlight-color: transparent;
             overflow-x: hidden;
-            touch-action: pan-y; /* 캔버스 외의 일반 스크롤 허용 */
+            touch-action: pan-y; 
         }
+        /* 모바일 드래그 시 브라우저 스크롤 완벽 차단 */
+        body.dragging {
+            touch-action: none !important;
+            overflow: hidden !important;
+        }
+
         .glass {
             background: rgba(30, 41, 59, 0.7);
             backdrop-filter: blur(12px);
@@ -52,25 +58,33 @@
         .ray-dash {
             stroke-dasharray: 10;
             animation: dashAnim 1s linear infinite;
+            will-change: stroke-dashoffset;
         }
         @keyframes dashAnim { to { stroke-dashoffset: -20; } }
         
         .laser-beam {
             stroke-dasharray: 15 5;
             animation: dashAnim 0.5s linear infinite;
+            will-change: stroke-dashoffset;
         }
 
         @keyframes pulseRing {
             0% { transform: scale(0.8); opacity: 0.8; }
             100% { transform: scale(1.6); opacity: 0; }
         }
-        .pulse-circle { animation: pulseRing 1.5s infinite; }
+        .pulse-circle { 
+            animation: pulseRing 1.5s infinite; 
+            will-change: transform, opacity;
+        }
 
         @keyframes explode {
             0% { transform: rotate(var(--r)) translate(0, 0) scale(1.5); opacity: 1; }
             100% { transform: rotate(var(--r)) translate(60px, 0) scale(0); opacity: 0; }
         }
-        .particle { animation: explode 0.6s cubic-bezier(0.1, 0.8, 0.3, 1) forwards; }
+        .particle { 
+            animation: explode 0.6s cubic-bezier(0.1, 0.8, 0.3, 1) forwards; 
+            will-change: transform, opacity;
+        }
 
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -80,13 +94,13 @@
 <body>
     <div id="root"></div>
 
-    <!-- data-presets와 pragma를 통해 자동 import 생성 완벽 차단 -->
     <script type="text/babel" data-presets="react">
         /** @jsx React.createElement */
         /** @jsxFrag React.Fragment */
 
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxp9VENZiuolSVTOkuGQ4jJHt1iYOD7sTHmFLj6p0tu9R1tvIKBIlewfrChY1l1z2g5/exec";
 
+        // 사운드 피드백 유틸리티
         const playFeedback = (type, combo = 0) => {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             if (!AudioContext) return;
@@ -173,6 +187,7 @@
             const svgRef = React.useRef(null);
             const [activeParticles, setActiveParticles] = React.useState([]);
 
+            // History API 적용 (뒤로가기 방어 및 iframe 보안 에러 폴백 추가)
             React.useEffect(() => {
                 const handlePopState = (e) => {
                     if (e.state && e.state.view) {
@@ -182,25 +197,44 @@
                     }
                 };
                 window.addEventListener('popstate', handlePopState);
-                if (!history.state) {
-                    history.replaceState({ view: 'intro' }, '', '?view=intro');
+                
+                try {
+                    if (!history.state) {
+                        history.replaceState({ view: 'intro' }, '', '?view=intro');
+                    }
+                } catch (err) {
+                    console.warn("현재 보안 환경(iframe)으로 인해 브라우저 URL 기록이 제한됩니다.");
                 }
+
                 return () => window.removeEventListener('popstate', handlePopState);
             }, []);
 
             const navigate = React.useCallback((newView) => {
-                history.pushState({ view: newView }, '', '?view=' + newView);
+                try {
+                    history.pushState({ view: newView }, '', '?view=' + newView);
+                } catch (err) {
+                    // blob/iframe 보안 제약이 걸린 캔버스 환경에서는 에러를 뱉지 않고 뷰 전환만 수행
+                }
                 setView(newView);
             }, []);
 
             const [simMode, setSimMode] = React.useState('ray');
 
+            // 타임어택 공통
             const [isTimeAttack, setIsTimeAttack] = React.useState(false);
             const [isTimeAttackPaused, setIsTimeAttackPaused] = React.useState(false); 
             const [timeLeft, setTimeLeft] = React.useState(0);
             const [score, setScore] = React.useState(0);
             const [combo, setCombo] = React.useState(0);
             const [maxCombo, setMaxCombo] = React.useState(0);
+
+            // 타이머 Stale Closure 방지를 위한 Ref
+            const scoreRef = React.useRef(score);
+            const maxComboRef = React.useRef(maxCombo);
+            React.useEffect(() => { scoreRef.current = score; }, [score]);
+            React.useEffect(() => { maxComboRef.current = maxCombo; }, [maxCombo]);
+
+            const [roundEarnedScore, setRoundEarnedScore] = React.useState(0);
 
             const [objectDist, setObjectDist] = React.useState(20);
             const [objectY, setObjectY] = React.useState(200);
@@ -214,12 +248,14 @@
             const [userClickDist, setUserClickDist] = React.useState(null);
             const [gameSuccessCount, setGameSuccessCount] = React.useState(0);
             const [isRoundSuccess, setIsRoundSuccess] = React.useState(false);
-            const gameSuccess = !isTimeAttack && gameSuccessCount >= 3;
+            const [normalGameSuccess, setNormalGameSuccess] = React.useState(false);
+            const gameSuccess = normalGameSuccess;
 
             const [reflectionLevel, setReflectionLevel] = React.useState(0);
             const [reflectionOptions, setReflectionOptions] = React.useState([]);
             const [reflectionAnswerState, setReflectionAnswerState] = React.useState(null);
             const [reflectionSuccess, setReflectionSuccess] = React.useState(false);
+            const [reflectionRound, setReflectionRound] = React.useState(0);
 
             const multiAngles = [180, 120, 90, 72, 60, 45, 36, 30];
             const [multiAngleIdx, setMultiAngleIdx] = React.useState(2);
@@ -241,6 +277,16 @@
             const [alertMsg, setAlertMsg] = React.useState('');
             const [isSubmitting, setIsSubmitting] = React.useState(false);
 
+            // 탭 전환 시 타임어택 안전 종료
+            const safeChangeTab = (mode) => {
+                if (isTimeAttack) {
+                    setIsTimeAttack(false);
+                    setIsTimeAttackPaused(false);
+                    setTimeLeft(0);
+                }
+                setSimMode(mode);
+            };
+
             React.useEffect(() => {
                 let timer;
                 if (isTimeAttack && !isTimeAttackPaused && timeLeft > 0) {
@@ -248,10 +294,10 @@
                 } else if (isTimeAttack && !isTimeAttackPaused && timeLeft === 0) {
                     setIsTimeAttack(false);
                     playFeedback('success');
-                    setAlertMsg(`⏰ 타임 오버!\n\n최종 점수: ${score}점\n최대 콤보: ${maxCombo}연속`);
+                    setAlertMsg(`⏰ 타임 오버!\n\n최종 점수: ${scoreRef.current}점\n최대 콤보: ${maxComboRef.current}연속`);
                 }
                 return () => clearTimeout(timer);
-            }, [isTimeAttack, isTimeAttackPaused, timeLeft, score, maxCombo]);
+            }, [isTimeAttack, isTimeAttackPaused, timeLeft]);
 
             const startTimeAttack = () => {
                 setIsTimeAttack(true);
@@ -261,13 +307,19 @@
                 setCombo(0);
                 setMaxCombo(0);
                 if (simMode === 'game') resetGameMode(true);
-                if (simMode === 'illusion') setReflectionLevel(Math.floor(Math.random() * 3));
+                if (simMode === 'illusion') {
+                    setReflectionLevel(Math.floor(Math.random() * 3));
+                    setReflectionRound(0); 
+                }
             };
 
             React.useEffect(() => {
-                const preventScroll = (e) => { if (isDraggingObj) e.preventDefault(); };
-                document.addEventListener('touchmove', preventScroll, { passive: false });
-                return () => document.removeEventListener('touchmove', preventScroll);
+                if (isDraggingObj) {
+                    document.body.classList.add('dragging');
+                } else {
+                    document.body.classList.remove('dragging');
+                }
+                return () => document.body.classList.remove('dragging');
             }, [isDraggingObj]);
 
             const triggerParticles = (x, y, isSuccess) => {
@@ -277,7 +329,10 @@
             };
 
             const resetGameMode = React.useCallback((isInitial = false) => {
-                if (isInitial) setGameSuccessCount(0);
+                if (isInitial) {
+                    setGameSuccessCount(0);
+                    setNormalGameSuccess(false);
+                }
                 setGameTargetDist(prev => {
                     let randomDist;
                     do { randomDist = Math.floor(Math.random() * 5 + 3) * 5; } while (randomDist === prev);
@@ -302,7 +357,7 @@
                 ];
                 setReflectionOptions(baseOptions.sort(() => Math.random() - 0.5));
                 setReflectionAnswerState(null);
-            }, [reflectionLevel, score]); 
+            }, [reflectionLevel, reflectionRound]); 
 
             React.useEffect(() => {
                 if (objectDist < minDist) setMinDist(objectDist);
@@ -315,49 +370,41 @@
 
             React.useEffect(() => {
                 if (simMode === 'fov') {
+                    const pTop = 100, pBot = 300, eyeY = 120;
                     const mTop = mirrorPos - mirrorLen / 2;
-                    const mBottom = mirrorPos + mirrorLen / 2;
-                    if (mTop <= 110 && mBottom >= 210) {
+                    const mBot = mirrorPos + mirrorLen / 2;
+                    const visibleTopY = eyeY + 2 * (mTop - eyeY);
+                    const visibleBotY = eyeY + 2 * (mBot - eyeY);
+                    
+                    if (visibleTopY <= pTop && visibleBotY >= pBot) {
                         setHasExploredFov(true);
                     }
                 }
             }, [mirrorLen, mirrorPos, simMode]);
 
             const handlePointerDown = (e) => {
-                if (simMode !== 'ray') return;
-                const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-                const clientY = e.clientY || (e.touches && e.touches[0].clientY);
-                if (!clientX || !clientY) return;
-
+                if (simMode !== 'ray' || !svgRef.current) return;
                 const rect = svgRef.current.getBoundingClientRect();
-                const x = (clientX - rect.left) * (800 / rect.width);
-                const y = (clientY - rect.top) * (400 / rect.height);
+                const x = (e.clientX - rect.left) * (800 / rect.width);
+                const y = (e.clientY - rect.top) * (400 / rect.height);
                 
                 const objX = 400 - objectDist * 5;
                 const dist = Math.sqrt((x - objX)**2 + (y - objectY)**2);
                 
                 if (dist < 100) {
                     setIsDraggingObj(true);
-                    e.target.setPointerCapture(e.pointerId);
+                    svgRef.current.setPointerCapture(e.pointerId);
                 }
             };
 
             const handlePointerMove = (e) => {
-                if (!isDraggingObj || simMode !== 'ray') return;
-                const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-                const clientY = e.clientY || (e.touches && e.touches[0].clientY);
-                if (!clientX || !clientY) return;
-
+                if (!isDraggingObj || simMode !== 'ray' || !svgRef.current) return;
                 const rect = svgRef.current.getBoundingClientRect();
-                const x = (clientX - rect.left) * (800 / rect.width);
-                const y = (clientY - rect.top) * (400 / rect.height);
+                const x = (e.clientX - rect.left) * (800 / rect.width);
+                const y = (e.clientY - rect.top) * (400 / rect.height);
                 
-                let newX = x;
-                if (newX < 200) newX = 200; 
-                if (newX > 350) newX = 350; 
-                let newY = y;
-                if (newY < 50) newY = 50;
-                if (newY > 350) newY = 350;
+                let newX = Math.max(200, Math.min(x, 350));
+                let newY = Math.max(50, Math.min(y, 300));
 
                 setObjectDist(Math.round((400 - newX) / 5));
                 setObjectY(Math.round(newY));
@@ -366,12 +413,12 @@
             const handlePointerUp = (e) => {
                 if (isDraggingObj) {
                     setIsDraggingObj(false);
-                    e.target.releasePointerCapture(e.pointerId);
+                    svgRef.current?.releasePointerCapture(e.pointerId);
                 }
             };
 
             const handleSvgClickGame = (e) => {
-                if (simMode !== 'game' || isRoundSuccess || (gameSuccess && !isTimeAttack) || (isTimeAttack && timeLeft === 0) || isTimeAttackPaused) return;
+                if (simMode !== 'game' || isRoundSuccess || gameSuccess || (isTimeAttack && timeLeft === 0) || isTimeAttackPaused) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const clickX = (e.clientX - rect.left) * (800 / rect.width);
                 const clickY = (e.clientY - rect.top) * (400 / rect.height);
@@ -392,7 +439,9 @@
                         const newCombo = combo + 1;
                         setCombo(newCombo);
                         setMaxCombo(prev => Math.max(prev, newCombo));
-                        setScore(s => s + 100 + newCombo * 20);
+                        const earned = 100 + newCombo * 20;
+                        setRoundEarnedScore(earned);
+                        setScore(s => s + earned);
                         playFeedback('combo', newCombo);
                         
                         setTimeout(() => {
@@ -406,6 +455,7 @@
                             playFeedback('correct');
                             setTimeout(() => resetGameMode(false), 1500);
                         } else {
+                            setNormalGameSuccess(true);
                             playFeedback('success');
                         }
                     }
@@ -443,12 +493,14 @@
                         const newCombo = combo + 1;
                         setCombo(newCombo);
                         setMaxCombo(prev => Math.max(prev, newCombo));
-                        setScore(s => s + 100 + newCombo * 30);
+                        const earned = 100 + newCombo * 30;
+                        setRoundEarnedScore(earned);
+                        setScore(s => s + earned);
                         playFeedback('combo', newCombo);
                         
                         setTimeout(() => {
                             setReflectionLevel(Math.floor(Math.random() * 3));
-                            setReflectionAnswerState(null);
+                            setReflectionRound(r => r + 1); 
                             setIsTimeAttackPaused(false);
                         }, 1500); 
                     } else {
@@ -470,7 +522,7 @@
                             setIsTimeAttackPaused(false);
                         }, 1500);
                     } else {
-                        setTimeout(() => setReflectionAnswerState(null), 1000);
+                        setTimeout(() => setReflectionAnswerState(null), 1500);
                     }
                 }
             };
@@ -478,7 +530,7 @@
             const nextReflectionLevel = () => {
                 if (reflectionLevel < reflectionLevels.length - 1) {
                     setReflectionLevel(prev => prev + 1);
-                    setReflectionAnswerState(null);
+                    setReflectionRound(r => r + 1); 
                 }
             };
 
@@ -562,11 +614,11 @@
                         
                         {/* 탭 네비게이션 */}
                         <div className="flex flex-wrap justify-center gap-2 mb-4 max-w-5xl mx-auto w-full text-xs sm:text-sm">
-                            <button onClick={() => {setSimMode('ray'); setIsTimeAttack(false);}} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'ray' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>1. 경로/각도</button>
-                            <button onClick={() => {setSimMode('game'); setIsTimeAttack(false);}} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'game' ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>2. 대칭 미션</button>
-                            <button onClick={() => {setSimMode('illusion'); setIsTimeAttack(false);}} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'illusion' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>3. 거울상</button>
-                            <button onClick={() => {setSimMode('multi'); setIsTimeAttack(false);}} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'multi' ? 'bg-pink-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>4. 만화경</button>
-                            <button onClick={() => {setSimMode('fov'); setIsTimeAttack(false);}} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'fov' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>5. 전신거울</button>
+                            <button onClick={() => safeChangeTab('ray')} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'ray' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>1. 경로/각도</button>
+                            <button onClick={() => safeChangeTab('game')} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'game' ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>2. 대칭 미션</button>
+                            <button onClick={() => safeChangeTab('illusion')} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'illusion' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>3. 거울상</button>
+                            <button onClick={() => safeChangeTab('multi')} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'multi' ? 'bg-pink-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>4. 만화경</button>
+                            <button onClick={() => safeChangeTab('fov')} className={`flex-1 min-w-[80px] py-2 px-1 rounded-xl font-bold transition-colors shadow-lg ${simMode === 'fov' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>5. 전신거울</button>
                         </div>
 
                         {/* 타임어택 UI 헤더 */}
@@ -587,7 +639,12 @@
                             </div>
                         )}
 
-                        <div className="flex flex-col lg:flex-row gap-6 flex-1 max-w-6xl mx-auto w-full">
+                        <div className="flex flex-col lg:flex-row gap-6 flex-1 max-w-6xl mx-auto w-full relative">
+                            {/* 타임어택 정답 확인 시 오버레이 */}
+                            {isTimeAttackPaused && (
+                                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/30 backdrop-blur-sm rounded-3xl pointer-events-none"></div>
+                            )}
+
                             {/* 시각화 영역 */}
                             <div className="glass rounded-3xl flex-[2] relative overflow-hidden flex flex-col shadow-2xl">
                                 {simMode !== 'multi' && simMode !== 'fov' && (
@@ -601,7 +658,7 @@
                                     ref={svgRef}
                                     viewBox="0 0 800 400" 
                                     className={`w-full h-full min-h-[350px] mt-4 ${simMode==='game' && !gameSuccess && !isTimeAttack && !isTimeAttackPaused ? 'cursor-pointer' : ''}`} 
-                                    style={{ backgroundColor: '#0f172a', touchAction: simMode === 'ray' ? 'none' : 'auto' }} 
+                                    style={{ backgroundColor: '#0f172a' }} 
                                     onPointerDown={handlePointerDown}
                                     onPointerMove={handlePointerMove}
                                     onPointerUp={handlePointerUp}
@@ -659,6 +716,8 @@
                                                     <path d="M 20 30 Q 25 35 30 30" fill="none" stroke="#334155" strokeWidth="2"/>
                                                 </g>
                                                 <text x="0" y="-35" fill={isImage ? "#94a3b8" : "#f1f5f9"} fontSize="14" textAnchor="middle" fontWeight="bold">{isImage ? "허상" : "실제"}</text>
+                                                {/* 터치 반경 확대 */}
+                                                {isDraggable && <circle cx="0" cy="0" r="100" fill="transparent" />}
                                             </g>
                                         );
 
@@ -747,7 +806,7 @@
                                                     <g className="animate-bounce">
                                                         <StarSVG x={targetImgX} y={200} opacity="1" color="#f59e0b" />
                                                         <text x={targetImgX} y={160} fill="#10b981" fontSize="18" textAnchor="middle" fontWeight="bold">
-                                                            {gameSuccess && !isTimeAttack ? "🎉 완료!" : (isTimeAttack ? `+${100+combo*20}점!` : "🎉 정답!")}
+                                                            {gameSuccess && !isTimeAttack ? "🎉 완료!" : (isTimeAttack ? `+${roundEarnedScore}점!` : "🎉 정답!")}
                                                         </text>
                                                         <line x1="400" y1="230" x2={targetImgX} y2="230" stroke="#10b981" strokeWidth="2"/>
                                                         <line x1={targetImgX} y1="225" x2={targetImgX} y2="235" stroke="#10b981" strokeWidth="2"/>
@@ -825,7 +884,10 @@
                                             imageAngles.push(k * theta);
                                             imageAngles.push(-k * theta);
                                         }
-                                        if (Math.round(360 / theta) % 2 === 0) imageAngles.push(180);
+                                        const mirrorCount = 360 / theta;
+                                        if (Math.abs(mirrorCount - Math.round(mirrorCount)) < 0.01 && Math.round(mirrorCount) % 2 === 0) {
+                                            imageAngles.push(180);
+                                        }
 
                                         return (
                                             <g>
@@ -882,11 +944,9 @@
                                         const mTop = mirrorPos - mirrorLen / 2;
                                         const mBot = mirrorPos + mirrorLen / 2;
 
-                                        // 눈에서 거울 양끝단으로 향하는 선이 사람 몸에 반사되는 y좌표 계산
                                         const visibleTopY = eyeY + 2 * (mTop - eyeY); 
                                         const visibleBotY = eyeY + 2 * (mBot - eyeY);
 
-                                        // 사람이 보이는 실제 범위 
                                         const boundedTop = Math.max(pTop, visibleTopY);
                                         const boundedBot = Math.min(pBot, visibleBotY);
                                         const isWholeBody = visibleTopY <= pTop && visibleBotY >= pBot;
@@ -895,18 +955,14 @@
                                             <g>
                                                 <line x1="0" y1="300" x2="800" y2="300" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
                                                 
-                                                {/* 거울 표면 */}
                                                 <line x1={mX} y1={mTop} x2={mX} y2={mBot} stroke="#cbd5e1" strokeWidth="8" strokeLinecap="round" filter="drop-shadow(0 0 8px rgba(255,255,255,0.8))"/>
                                                 <text x={mX} y={mTop - 15} fill="#f8fafc" fontSize="14" textAnchor="middle" fontWeight="bold">벽면 거울</text>
                                                 
-                                                {/* 시야각 강조 영역 */}
                                                 <polygon points={`${mX},${mTop} ${mX},${mBot} 0,${visibleBotY} 0,${visibleTopY}`} fill="url(#fovGrad)" />
 
-                                                {/* 눈 -> 거울 -> 몸 경로 선 */}
                                                 <polyline points={`${pX},${eyeY} ${mX},${mTop} ${pX},${visibleTopY}`} fill="none" stroke="#fbbf24" strokeWidth="2" strokeDasharray="5,5" className="ray-dash"/>
                                                 <polyline points={`${pX},${eyeY} ${mX},${mBot} ${pX},${visibleBotY}`} fill="none" stroke="#3b82f6" strokeWidth="2" strokeDasharray="5,5" className="ray-dash"/>
 
-                                                {/* 사람 그리기 */}
                                                 <g transform={`translate(${pX}, 0)`}>
                                                     <rect x="-20" y={pTop} width="40" height={pHeight} rx="10" fill="rgba(255,255,255,0.1)" stroke="#475569" strokeWidth="2" />
                                                     <circle cx="0" cy={pTop+20} r="18" fill="rgba(255,255,255,0.1)" stroke="#475569" strokeWidth="2"/>
@@ -940,8 +996,8 @@
                                 </svg>
                             </div>
 
-                            {/* 조작 패널 (모드에 따라 동적 변경) */}
-                            <div className="glass rounded-3xl p-5 lg:w-72 flex flex-col shadow-2xl overflow-y-auto max-h-[350px] lg:max-h-none">
+                            {/* 조작 패널 */}
+                            <div className={`glass rounded-3xl p-5 lg:w-72 flex flex-col shadow-2xl overflow-y-auto max-h-[350px] lg:max-h-none transition-opacity ${isTimeAttackPaused ? 'pointer-events-none opacity-50' : ''}`}>
                                 
                                 {/* 모드 1 조작부 */}
                                 {simMode === 'ray' && (
@@ -1023,7 +1079,7 @@
                                                     key={i} 
                                                     onClick={() => handleReflectionGuess(opt.id)}
                                                     disabled={reflectionAnswerState === 'correct'}
-                                                    className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 border-2 border-slate-600 rounded-xl p-3 flex items-center justify-center transition-colors btn-active h-16"
+                                                    className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 border-2 border-slate-600 rounded-xl p-3 flex items-center justify-center transition-colors btn-active h-20 sm:h-24"
                                                 >
                                                     <svg viewBox="-50 -50 100 100" className="w-full h-full pointer-events-none">
                                                         <g transform={`scale(${opt.scaleX}, ${opt.scaleY})`}>
@@ -1040,7 +1096,7 @@
                                         </div>
 
                                         <div className="h-10 mt-1 flex items-center justify-center">
-                                            {reflectionAnswerState === 'wrong' && <div className="text-red-400 font-bold text-sm animate-pulse">오답! 좌우가 아닌 앞뒤를 생각해보세요.</div>}
+                                            {reflectionAnswerState === 'wrong' && <div className="text-red-400 font-bold text-sm animate-pulse">오답! 앞뒤를 생각해보세요.</div>}
                                             {reflectionAnswerState === 'correct' && !isTimeAttack && (
                                                 <div className="w-full text-center">
                                                     <div className="text-green-400 font-bold text-xs mb-1">정답! 거울면에 가까운 쪽은 맺히는 상도 가깝습니다. (앞뒤 반전)</div>
@@ -1116,87 +1172,98 @@
                 );
             };
 
-            const renderReport = () => (
-                <div className="max-w-3xl mx-auto p-4 sm:p-6 pb-24 pt-[max(env(safe-area-inset-top,24px),24px)] animate-fade-in">
-                    <h2 className="text-3xl font-black text-white mb-8 text-center mt-4">종합 실험 보고서</h2>
-                    
-                    <div className="space-y-6">
-                        <div className="glass p-6 rounded-2xl">
-                            <h3 className="text-xl font-bold text-blue-400 mb-4 border-b border-slate-700 pb-2">1. 미션 수행 결과</h3>
-                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                                <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
-                                    <div className="text-[10px] text-slate-400 mb-1">경로/각도</div><div className="text-xs font-bold text-white">확인 완료</div>
-                                </div>
-                                <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
-                                    <div className="text-[10px] text-slate-400 mb-1">대칭 미션</div><div className={`text-xs font-bold ${gameSuccess ? 'text-green-400' : 'text-slate-500'}`}>{gameSuccess ? '성공' : '미완료'}</div>
-                                </div>
-                                <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
-                                    <div className="text-[10px] text-slate-400 mb-1">상 찾기</div><div className={`text-xs font-bold ${reflectionSuccess ? 'text-purple-400' : 'text-slate-500'}`}>{reflectionSuccess ? '완료' : '미완료'}</div>
-                                </div>
-                                <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
-                                    <div className="text-[10px] text-slate-400 mb-1">만화경</div><div className={`text-xs font-bold ${hasExploredMulti ? 'text-pink-400' : 'text-slate-500'}`}>{hasExploredMulti ? '체험' : '미완료'}</div>
-                                </div>
-                                <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center bg-emerald-900/20 border-emerald-500/30">
-                                    <div className="text-[10px] text-emerald-400 mb-1">전신거울</div><div className={`text-xs font-bold ${hasExploredFov ? 'text-emerald-400' : 'text-slate-500'}`}>{hasExploredFov ? '정답 확인!' : '미완료'}</div>
-                                </div>
-                            </div>
-                            
-                            {/* 타임어택 점수 기록이 있으면 표시 */}
-                            {(score > 0 || maxCombo > 0) && (
-                                <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded-xl flex justify-between items-center">
-                                    <span className="font-bold text-red-400">🔥 타임어택 기록</span>
-                                    <span className="text-white font-black text-lg">{score}점 (최대 {maxCombo}콤보)</span>
-                                </div>
-                            )}
+            const renderReport = () => {
+                let completedCount = 1; 
+                if (gameSuccess) completedCount++;
+                if (reflectionSuccess) completedCount++;
+                if (hasExploredMulti) completedCount++;
+                if (hasExploredFov) completedCount++;
+
+                return (
+                    <div className="max-w-3xl mx-auto p-4 sm:p-6 pb-24 pt-[max(env(safe-area-inset-top,24px),24px)] animate-fade-in">
+                        <h2 className="text-3xl font-black text-white mb-4 text-center mt-4">종합 실험 보고서</h2>
+                        
+                        <div className="text-center text-emerald-400 font-bold mb-6 text-sm">
+                            🎉 현재 5개 탐구 중 {completedCount}개 미션 완료!
                         </div>
 
-                        <div className="glass p-6 rounded-2xl">
-                            <h3 className="text-xl font-bold text-yellow-400 mb-4 border-b border-slate-700 pb-2">2. 개념 확인 OX 퀴즈</h3>
-                            <div className="space-y-4">
-                                {quizzes.map((quiz, idx) => (
-                                    <div key={idx} className="glass-panel p-4 rounded-xl">
-                                        <p className="font-bold text-white mb-3 text-sm">Q{idx + 1}. {quiz.q}</p>
-                                        <div className="flex gap-4">
-                                            <button onClick={() => handleQuizAnswer(idx, true)} className={`flex-1 py-2 rounded-lg font-bold border-2 transition-all btn-active text-sm ${quizAnswers[idx] === true ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-600 text-slate-400'}`}>O 맞음</button>
-                                            <button onClick={() => handleQuizAnswer(idx, false)} className={`flex-1 py-2 rounded-lg font-bold border-2 transition-all btn-active text-sm ${quizAnswers[idx] === false ? 'bg-red-600 border-red-500 text-white' : 'border-slate-600 text-slate-400'}`}>X 틀림</button>
-                                        </div>
-                                        {quizAnswers[idx] !== null && (
-                                            <div className={`mt-3 p-3 rounded-lg text-xs leading-relaxed ${quizAnswers[idx] === quiz.a ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
-                                                <strong>{quizAnswers[idx] === quiz.a ? '정답입니다!' : '오답입니다.'}</strong> {quiz.explain}
-                                            </div>
-                                        )}
+                        <div className="space-y-6">
+                            <div className="glass p-6 rounded-2xl">
+                                <h3 className="text-xl font-bold text-blue-400 mb-4 border-b border-slate-700 pb-2">1. 미션 수행 결과</h3>
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                    <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
+                                        <div className="text-[10px] text-slate-400 mb-1">경로/각도</div><div className="text-xs font-bold text-white">확인 완료</div>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="glass p-6 rounded-2xl">
-                            <h3 className="text-xl font-bold text-emerald-400 mb-4 border-b border-slate-700 pb-2">3. 학생 정보 및 제출</h3>
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-300 mb-2">학번</label>
-                                    <input type="text" value={studentId} onChange={e=>setStudentId(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500"/>
+                                    <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
+                                        <div className="text-[10px] text-slate-400 mb-1">대칭 미션</div><div className={`text-xs font-bold ${gameSuccess ? 'text-green-400' : 'text-slate-500'}`}>{gameSuccess ? '성공' : '미완료'}</div>
+                                    </div>
+                                    <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
+                                        <div className="text-[10px] text-slate-400 mb-1">상 찾기</div><div className={`text-xs font-bold ${reflectionSuccess ? 'text-purple-400' : 'text-slate-500'}`}>{reflectionSuccess ? '완료' : '미완료'}</div>
+                                    </div>
+                                    <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center">
+                                        <div className="text-[10px] text-slate-400 mb-1">만화경</div><div className={`text-xs font-bold ${hasExploredMulti ? 'text-pink-400' : 'text-slate-500'}`}>{hasExploredMulti ? '체험' : '미완료'}</div>
+                                    </div>
+                                    <div className="glass-panel p-2 rounded-xl text-center flex flex-col justify-center bg-emerald-900/20 border-emerald-500/30">
+                                        <div className="text-[10px] text-emerald-400 mb-1">전신거울</div><div className={`text-xs font-bold ${hasExploredFov ? 'text-emerald-400' : 'text-slate-500'}`}>{hasExploredFov ? '정답 확인!' : '미완료'}</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-300 mb-2">이름</label>
-                                    <input type="text" value={studentName} onChange={e=>setStudentName(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500"/>
-                                </div>
-                            </div>
-                            <div className="mb-6">
-                                <label className="block text-sm font-bold text-slate-300 mb-2">다섯 가지 실험을 통해 새롭게 알게 된 점</label>
-                                <textarea value={insight} onChange={e=>setInsight(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white h-24 resize-none focus:outline-none focus:border-blue-500 text-sm leading-relaxed" placeholder="입사/반사각, 대칭성, 거울상의 특징(좌우가 아닌 앞뒤 반전), 다중 거울, 전신 거울의 원리 등 배운 내용을 자유롭게 적어주세요."></textarea>
+                                
+                                {(score > 0 || maxCombo > 0) && (
+                                    <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded-xl flex justify-between items-center">
+                                        <span className="font-bold text-red-400">🔥 타임어택 기록</span>
+                                        <span className="text-white font-black text-lg">{score}점 (최대 {maxCombo}콤보)</span>
+                                    </div>
+                                )}
                             </div>
 
-                            <button onClick={submitData} disabled={isSubmitting} className="btn-active w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 text-white rounded-xl font-bold text-lg flex justify-center items-center">
-                                {isSubmitting ? "제출하는 중..." : "결과 제출하기 📤"}
-                            </button>
-                        </div>
-                        <div className="text-center">
-                            <button onClick={()=>navigate('simulation')} className="text-slate-400 underline hover:text-white text-sm">실험실로 돌아가기</button>
+                            <div className="glass p-6 rounded-2xl">
+                                <h3 className="text-xl font-bold text-yellow-400 mb-4 border-b border-slate-700 pb-2">2. 개념 확인 OX 퀴즈</h3>
+                                <div className="space-y-4">
+                                    {quizzes.map((quiz, idx) => (
+                                        <div key={idx} className="glass-panel p-4 rounded-xl">
+                                            <p className="font-bold text-white mb-3 text-sm">Q{idx + 1}. {quiz.q}</p>
+                                            <div className="flex gap-4">
+                                                <button onClick={() => handleQuizAnswer(idx, true)} className={`flex-1 py-2 rounded-lg font-bold border-2 transition-all btn-active text-sm ${quizAnswers[idx] === true ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-600 text-slate-400'}`}>O 맞음</button>
+                                                <button onClick={() => handleQuizAnswer(idx, false)} className={`flex-1 py-2 rounded-lg font-bold border-2 transition-all btn-active text-sm ${quizAnswers[idx] === false ? 'bg-red-600 border-red-500 text-white' : 'border-slate-600 text-slate-400'}`}>X 틀림</button>
+                                            </div>
+                                            {quizAnswers[idx] !== null && (
+                                                <div className={`mt-3 p-3 rounded-lg text-xs leading-relaxed ${quizAnswers[idx] === quiz.a ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
+                                                    <strong>{quizAnswers[idx] === quiz.a ? '정답입니다!' : '오답입니다.'}</strong> {quiz.explain}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="glass p-6 rounded-2xl">
+                                <h3 className="text-xl font-bold text-emerald-400 mb-4 border-b border-slate-700 pb-2">3. 학생 정보 및 제출</h3>
+                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-300 mb-2">학번</label>
+                                        <input type="text" value={studentId} onChange={e=>setStudentId(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500"/>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-300 mb-2">이름</label>
+                                        <input type="text" value={studentName} onChange={e=>setStudentName(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500"/>
+                                    </div>
+                                </div>
+                                <div className="mb-6">
+                                    <label className="block text-sm font-bold text-slate-300 mb-2">다섯 가지 실험을 통해 새롭게 알게 된 점</label>
+                                    <textarea value={insight} onChange={e=>setInsight(e.target.value)} className="w-full bg-slate-800 border border-slate-600 rounded-xl p-3 text-white h-24 resize-none focus:outline-none focus:border-blue-500 text-sm leading-relaxed" placeholder="입사/반사각, 대칭성, 거울상의 특징(좌우가 아닌 앞뒤 반전), 다중 거울, 전신 거울의 원리 등 배운 내용을 자유롭게 적어주세요."></textarea>
+                                </div>
+
+                                <button onClick={submitData} disabled={isSubmitting} className="btn-active w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-600 text-white rounded-xl font-bold text-lg flex justify-center items-center">
+                                    {isSubmitting ? "제출하는 중..." : "결과 제출하기 📤"}
+                                </button>
+                            </div>
+                            <div className="text-center">
+                                <button onClick={()=>navigate('simulation')} className="text-slate-400 underline hover:text-white text-sm">실험실로 돌아가기</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            );
+                );
+            };
 
             const renderDone = () => (
                 <div className="flex flex-col items-center justify-center min-h-[100dvh] p-6 text-center animate-fade-in pb-[max(env(safe-area-inset-bottom,24px),24px)]">
